@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Offerte Calculator · Jansen Renovatie & Aanbouw</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: { brand: { 50:'#eff6ff',100:'#dbeafe',500:'#2563eb',600:'#1d4ed8',700:'#1e40af' } }
+    }
+  }
+}
+</script>
+<style>
+  body { background: #f8fafc; font-family: 'Inter', system-ui, sans-serif; }
+  .fade-in { animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media print { .no-print { display: none !important; } body { background: white; } }
+  input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+</style>
+</head>
+<body>
+
+<!-- ===== CONFIG (aanpassen per klant) ===== -->
+<script>
+const CONFIG = {
+  naam: 'Jansen Renovatie & Aanbouw',
+  logo: 'JR',
+  email: 'info@jansenrenovatie.nl',
+  telefoon: '06-12345678',
+  adres: 'Bouwstraat 12, 1234 AB Amsterdam',
+  kvk: '12345678',
+  btwnummer: 'NL123456789B01',
+  uurtarief: 65,
+  marge: 15,
+  risico: 5,
+  btwPct: 21,
+  geldigheid: 30,
+  voorwaarden: [
+    'Offerte is geldig voor 30 dagen na dagtekening.',
+    'Prijzen zijn exclusief BTW, tenzij anders vermeld.',
+    'Meerwerk wordt vooraf schriftelijk overeengekomen.',
+    'Betalingstermijn: 14 dagen na factuurdatum.',
+  ],
+  aannames: [
+    'Prijzen zijn gebaseerd op normaal toegankelijke werklocatie.',
+    'Stroom en water zijn beschikbaar op locatie.',
+    'Eventuele meerwerken worden vooraf overlegd.',
+  ],
+}
+</script>
+
+<!-- ===== APP ===== -->
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let state = {
+  screen: 'home',   // home | calculator | quote | lead
+  step: 1,
+  klant: { naam:'', type:'particulier', email:'', telefoon:'', adres:'', plaats:'', omschrijving:'' },
+  project: { type:'renovatie', startdatum:'', urgentie:'normaal', locatie:'', moeilijkheid:'normaal' },
+  werkzaamheden: [],
+  extra: { voorrijkosten:0, afval:0, materieel:0, onderaannemer:0, parkeer:0, spoed:0, overige:0, overigeNaam:'' },
+  offerteNr: '',
+  datum: '',
+}
+
+function setState(partial) {
+  Object.assign(state, partial)
+  render()
+}
+
+// ─── Demo data ────────────────────────────────────────────────────────────────
+function loadDemo() {
+  state.klant = { naam:'Familie De Vries', type:'particulier', email:'devries@example.nl',
+    telefoon:'06-98765432', adres:'Kerkstraat 45', plaats:'Utrecht',
+    omschrijving:'Renovatie begane grond: wand verwijderen, nieuwe indeling woonkamer en schilderwerk.' }
+  state.project = { type:'renovatie', startdatum:'2024-09-01', urgentie:'normaal', locatie:'Utrecht', moeilijkheid:'normaal' }
+  state.werkzaamheden = [
+    { id:'1', naam:'Sloopwerk bestaande wand', omschrijving:'Verwijderen niet-dragende binnenwand incl. afvoer puin',
+      aantal:12, eenheid:'m²', matPrijs:5, uren:8, tarief:CONFIG.uurtarief, marge:CONFIG.marge, risico:CONFIG.risico, btw:21 },
+    { id:'2', naam:'Nieuwe binnenwand plaatsen', omschrijving:'Metaalstud wand met gipsplaten, incl. afwerking',
+      aantal:12, eenheid:'m²', matPrijs:45, uren:16, tarief:CONFIG.uurtarief, marge:CONFIG.marge, risico:CONFIG.risico, btw:21 },
+    { id:'3', naam:'Schilderwerk wanden', omschrijving:'2x schilderen, incl. grondlaag en afwerking',
+      aantal:40, eenheid:'m²', matPrijs:8, uren:12, tarief:CONFIG.uurtarief, marge:CONFIG.marge, risico:CONFIG.risico, btw:21 },
+  ]
+  state.extra = { voorrijkosten:75, afval:150, materieel:0, onderaannemer:0, parkeer:25, spoed:0, overige:0, overigeNaam:'' }
+  state.step = 1
+  state.screen = 'calculator'
+  render()
+}
+
+// ─── Calc helpers ─────────────────────────────────────────────────────────────
+function calcItem(w) {
+  const mat = w.aantal * w.matPrijs
+  const arb = w.uren * w.tarief
+  const basis = mat + arb
+  const risico = basis * (w.risico / 100)
+  const marge = basis * (w.marge / 100)
+  const exclBtw = basis + risico + marge
+  const btw = exclBtw * (w.btw / 100)
+  return { mat, arb, basis, risico, marge, exclBtw, btw, inclBtw: exclBtw + btw }
+}
+
+function calcTotals() {
+  const ws = state.werkzaamheden
+  const ex = state.extra
+  const totMat = ws.reduce((s,w) => s + w.aantal * w.matPrijs, 0)
+  const totArb = ws.reduce((s,w) => s + w.uren * w.tarief, 0)
+  const totRisico = ws.reduce((s,w) => {
+    const b = w.aantal*w.matPrijs + w.uren*w.tarief; return s + b*(w.risico/100)
+  }, 0)
+  const totMarge = ws.reduce((s,w) => {
+    const b = w.aantal*w.matPrijs + w.uren*w.tarief; return s + b*(w.marge/100)
+  }, 0)
+  const totBtw = ws.reduce((s,w) => {
+    const b = w.aantal*w.matPrijs + w.uren*w.tarief
+    const r = b*(w.risico/100), m = b*(w.marge/100)
+    return s + (b+r+m)*(w.btw/100)
+  }, 0)
+  const extraSum = ex.voorrijkosten+ex.afval+ex.materieel+ex.onderaannemer+ex.parkeer+ex.spoed+ex.overige
+  const extraBtw = extraSum * 0.21
+  const subtotaal = totMat + totArb + totRisico + totMarge + extraSum
+  const btw = totBtw + extraBtw
+  return { totMat, totArb, totRisico, totMarge, extraSum, subtotaal, btw, totaal: subtotaal + btw }
+}
+
+// ─── Format helpers ───────────────────────────────────────────────────────────
+const eur = n => new Intl.NumberFormat('nl-NL', { style:'currency', currency:'EUR' }).format(n)
+const datum = d => d ? new Date(d).toLocaleDateString('nl-NL', { day:'numeric', month:'long', year:'numeric' }) : ''
+const newId = () => Date.now().toString()
+function offerteNr() {
+  if (!state.offerteNr) state.offerteNr = `OFF-${new Date().getFullYear()}-${Math.floor(Math.random()*900)+100}`
+  return state.offerteNr
+}
+
+const projectLabels = {
+  renovatie:'Renovatie', aanbouw:'Aanbouw', dakwerk:'Dakwerk',
+  timmerwerk:'Timmerwerk', badkamer_toilet:'Badkamer / Toilet', algemene_klus:'Algemene klus'
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function render() {
+  document.getElementById('app').innerHTML = buildApp()
+  attachEvents()
+}
+
+function buildApp() {
+  if (state.screen === 'home') return buildHome()
+  if (state.screen === 'calculator') return buildCalculator()
+  if (state.screen === 'quote') return buildFullQuote()
+  if (state.screen === 'lead') return buildLead()
+  return ''
+}
+
+// ─── HOME ─────────────────────────────────────────────────────────────────────
+function buildHome() {
+  return `
+  <div class="max-w-4xl mx-auto pt-8 space-y-12 fade-in">
+    <div class="text-center max-w-2xl mx-auto">
+      <div class="inline-flex items-center gap-2 bg-blue-50 text-blue-700 text-sm font-medium px-4 py-2 rounded-full mb-6">
+        🏗️ Demo versie · ${CONFIG.naam}
+      </div>
+      <h1 class="text-4xl font-bold text-gray-900 mb-4 leading-tight">
+        Professionele offertes<br/>in enkele minuten
+      </h1>
+      <p class="text-lg text-gray-500 mb-8">
+        Bereken materiaal, arbeid, marge en BTW — en genereer direct een nette conceptofferte op basis van jouw tarieven.
+      </p>
+      <div class="flex gap-4 justify-center flex-wrap">
+        <button onclick="newQuote()" class="px-8 py-4 rounded-2xl bg-blue-600 text-white font-semibold text-lg hover:bg-blue-700 transition shadow-lg shadow-blue-100">
+          Nieuwe offerte maken →
+        </button>
+        <button onclick="loadDemo()" class="px-8 py-4 rounded-2xl border-2 border-gray-200 text-gray-700 font-semibold text-lg hover:bg-gray-50 transition">
+          Bekijk demo
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-6">
+      ${[['⚡','Snel','Van projectinvoer tot conceptofferte in een paar minuten.'],
+         ['🎯','Nauwkeurig','Vaste rekenformules voor marge, risico-opslag en BTW.'],
+         ['📄','Professioneel','Nette offerte met jouw huisstijl, klaar om te versturen.']
+      ].map(([i,t,d]) => `
+        <div class="bg-white rounded-2xl border border-gray-100 p-6 text-center">
+          <div class="text-3xl mb-3">${i}</div>
+          <h3 class="font-semibold text-gray-900 mb-1">${t}</h3>
+          <p class="text-gray-500 text-sm">${d}</p>
+        </div>`).join('')}
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-100 p-8">
+      <h2 class="text-xl font-semibold text-gray-900 mb-6 text-center">Zo werkt het</h2>
+      <div class="grid grid-cols-3 gap-6">
+        ${[['1','Klantgegevens','Naam, adres, type project.'],
+           ['2','Werkzaamheden','Materiaal, uren, tarieven en marge.'],
+           ['3','Offerte gereed','Overzicht en conceptofferte klaar.']
+        ].map(([n,t,d]) => `
+          <div class="flex gap-4">
+            <div class="w-10 h-10 rounded-xl bg-blue-600 text-white font-bold flex items-center justify-center flex-shrink-0">${n}</div>
+            <div><p class="font-semibold text-gray-900 text-sm">${t}</p><p class="text-gray-500 text-sm">${d}</p></div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="bg-blue-600 rounded-2xl p-8 text-center text-white">
+      <h2 class="text-2xl font-bold mb-2">Wil je deze calculator met jouw eigen prijzen?</h2>
+      <p class="text-blue-200 mb-6">We passen de tool aan op jouw tarieven, diensten, marge en huisstijl. Klaar in 1–2 werkdagen.</p>
+      <button onclick="setState({screen:'lead'})" class="px-6 py-3 rounded-xl bg-white text-blue-700 font-semibold hover:bg-blue-50 transition">
+        Aanvragen voor jouw bedrijf →
+      </button>
+    </div>
+  </div>`
+}
+
+// ─── CALCULATOR ───────────────────────────────────────────────────────────────
+function newQuote() {
+  state.klant = { naam:'', type:'particulier', email:'', telefoon:'', adres:'', plaats:'', omschrijving:'' }
+  state.project = { type:'renovatie', startdatum:'', urgentie:'normaal', locatie:'', moeilijkheid:'normaal' }
+  state.werkzaamheden = []
+  state.extra = { voorrijkosten:0, afval:0, materieel:0, onderaannemer:0, parkeer:0, spoed:0, overige:0, overigeNaam:'' }
+  state.step = 1
+  state.offerteNr = ''
+  state.screen = 'calculator'
+  render()
+}
+
+function buildCalculator() {
+  const pct = Math.round((state.step / 5) * 100)
+  const titles = ['Klantgegevens','Projectgegevens','Werkzaamheden','Extra kosten','Samenvatting']
+
+  const canNext = () => {
+    if (state.step === 1) return state.klant.naam.trim().length > 0
+    if (state.step === 3) return state.werkzaamheden.length > 0
+    return true
+  }
+
+  const prevBtn = state.step > 1
+    ? `<button onclick="setState({step:${state.step-1}})" class="px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 transition">← Vorige</button>`
+    : `<button disabled class="px-5 py-2.5 rounded-xl border border-gray-200 text-gray-300 font-medium cursor-not-allowed">← Vorige</button>`
+
+  let nextBtn = ''
+  if (state.step < 5) {
+    const dis = !canNext()
+    nextBtn = `<button onclick="nextStep()" ${dis?'disabled':''} class="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition ${dis?'opacity-40 cursor-not-allowed':''}">
+      ${state.step === 4 ? 'Bekijk samenvatting →' : 'Volgende stap →'}</button>`
+  }
+
+  return `
+  <div class="max-w-3xl mx-auto fade-in">
+    <!-- Back to home -->
+    <button onclick="setState({screen:'home'})" class="mb-6 flex items-center gap-2 text-gray-400 hover:text-gray-600 transition text-sm no-print">
+      ← Terug naar home
+    </button>
+
+    <!-- Progress -->
+    <div class="mb-8">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-medium text-gray-500">Stap ${state.step} van 5 — ${titles[state.step-1]}</span>
+        <span class="text-sm text-gray-400">${pct}% voltooid</span>
+      </div>
+      <div class="h-2 bg-gray-200 rounded-full">
+        <div class="h-2 bg-blue-600 rounded-full transition-all duration-300" style="width:${pct}%"></div>
+      </div>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+      <h2 class="text-xl font-semibold text-gray-900 mb-6">Stap ${state.step} — ${titles[state.step-1]}</h2>
+      ${buildStep(state.step)}
+
+      <!-- Nav buttons -->
+      <div class="flex items-center justify-between mt-8 pt-6 border-t border-gray-100">
+        ${prevBtn}
+        ${nextBtn}
+      </div>
+    </div>
+  </div>`
+}
+
+function buildStep(s) {
+  if (s === 1) return buildKlantForm()
+  if (s === 2) return buildProjectForm()
+  if (s === 3) return buildWerkForm()
+  if (s === 4) return buildExtraForm()
+  if (s === 5) return buildSamenvatting()
+  return ''
+}
+
+// ─── STEP 1: Klant ────────────────────────────────────────────────────────────
+function buildKlantForm() {
+  const k = state.klant
+  const inp = 'w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 border-transparent'
+  const lbl = 'block text-sm font-medium text-gray-700 mb-1.5'
+  const typeBtn = (v, label) => `
+    <button onclick="setKlant('type','${v}')" class="flex-1 py-3 rounded-xl border-2 text-sm font-medium transition
+      ${k.type===v ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}">
+      ${label}
+    </button>`
+
+  return `
+  <div class="space-y-5">
+    <div>
+      <p class="${lbl}">Type klant</p>
+      <div class="flex gap-3">
+        ${typeBtn('particulier','🏠 Particulier')}
+        ${typeBtn('bedrijf','🏢 Bedrijf')}
+      </div>
+    </div>
+    <div>
+      <label class="${lbl}">${k.type==='bedrijf'?'Contactpersoon':'Naam'}</label>
+      <input class="${inp}" placeholder="Naam klant" value="${k.naam}" oninput="setKlant('naam',this.value)" />
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="${lbl}">E-mailadres</label>
+        <input class="${inp}" type="email" placeholder="email@voorbeeld.nl" value="${k.email}" oninput="setKlant('email',this.value)" />
+      </div>
+      <div>
+        <label class="${lbl}">Telefoonnummer</label>
+        <input class="${inp}" placeholder="06-12345678" value="${k.telefoon}" oninput="setKlant('telefoon',this.value)" />
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="${lbl}">Adres</label>
+        <input class="${inp}" placeholder="Straat en huisnummer" value="${k.adres}" oninput="setKlant('adres',this.value)" />
+      </div>
+      <div>
+        <label class="${lbl}">Plaats</label>
+        <input class="${inp}" placeholder="Woonplaats" value="${k.plaats}" oninput="setKlant('plaats',this.value)" />
+      </div>
+    </div>
+    <div>
+      <label class="${lbl}">Korte projectomschrijving</label>
+      <textarea class="${inp} resize-none" rows="3" placeholder="Beschrijf kort wat de klant wil laten doen..."
+        oninput="setKlant('omschrijving',this.value)">${k.omschrijving}</textarea>
+    </div>
+  </div>`
+}
+
+// ─── STEP 2: Project ──────────────────────────────────────────────────────────
+function buildProjectForm() {
+  const p = state.project
+  const inp = 'w-full rounded-xl border border-gray-200 px-4 py-3 text-sm'
+  const lbl = 'block text-sm font-medium text-gray-700 mb-1.5'
+  
+  const types = [
+    ['renovatie','🔨','Renovatie'], ['aanbouw','🏗️','Aanbouw'],
+    ['dakwerk','🏠','Dakwerk'], ['timmerwerk','🪚','Timmerwerk'],
+    ['badkamer_toilet','🚿','Badkamer/Toilet'], ['algemene_klus','🔧','Alg. klus']
+  ]
+  const urgencies = [['flexibel','😌 Flexibel'],['normaal','📅 Normaal'],['spoed','⚡ Spoed']]
+  const moeilijkheden = [['normaal','⭐ Normaal'],['complex','⭐⭐ Complex'],['zeer_complex','⭐⭐⭐ Zeer complex']]
+
+  return `
+  <div class="space-y-6">
+    <div>
+      <p class="${lbl}">Type project</p>
+      <div class="grid grid-cols-3 gap-3">
+        ${types.map(([v,ic,label]) => `
+          <button onclick="setProject('type','${v}')" class="py-3 px-3 rounded-xl border-2 text-sm font-medium text-center transition
+            ${p.type===v ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}">
+            <div class="text-xl mb-1">${ic}</div>${label}
+          </button>`).join('')}
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="${lbl}">Gewenste startdatum</label>
+        <input class="${inp}" type="date" value="${p.startdatum}" onchange="setProject('startdatum',this.value)" />
+      </div>
+      <div>
+        <label class="${lbl}">Locatie / Stad</label>
+        <input class="${inp}" placeholder="bijv. Amsterdam" value="${p.locatie}" oninput="setProject('locatie',this.value)" />
+      </div>
+    </div>
+    <div>
+      <p class="${lbl}">Urgentie</p>
+      <div class="flex gap-3">
+        ${urgencies.map(([v,label]) => `
+          <button onclick="setProject('urgentie','${v}')" class="flex-1 py-2.5 rounded-xl border-2 text-sm font-medium transition
+            ${p.urgentie===v ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}">
+            ${label}
+          </button>`).join('')}
+      </div>
+    </div>
+    <div>
+      <p class="${lbl}">Moeilijkheidsgraad</p>
+      <div class="flex gap-3">
+        ${moeilijkheden.map(([v,label]) => `
+          <button onclick="setProject('moeilijkheid','${v}')" class="flex-1 py-2.5 rounded-xl border-2 text-sm font-medium transition
+            ${p.moeilijkheid===v ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}">
+            ${label}
+          </button>`).join('')}
+      </div>
+    </div>
+  </div>`
+}
+
+// ─── STEP 3: Werkzaamheden ────────────────────────────────────────────────────
+function buildWerkForm() {
+  const ws = state.werkzaamheden
+  const totaal = ws.reduce((s,w) => s + calcItem(w).inclBtw, 0)
+  const inp = 'w-full rounded-lg border border-gray-200 px-3 py-2 text-sm'
+  const lbl = 'block text-xs font-medium text-gray-600 mb-1'
+
+  const rows = ws.map((w, idx) => {
+    const c = calcItem(w)
+    const open = w._open
+    return `
+    <div class="border border-gray-200 rounded-xl overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 bg-gray-50 cursor-pointer select-none"
+           onclick="toggleWerk('${w.id}')">
+        <div class="flex items-center gap-3">
+          <span class="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center">${idx+1}</span>
+          <span class="font-medium text-sm text-gray-800">${w.naam || 'Nieuwe werkzaamheid'}</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="text-sm font-semibold text-gray-700">${eur(c.inclBtw)}</span>
+          <button onclick="event.stopPropagation();removeWerk('${w.id}')" class="text-red-400 hover:text-red-600 text-lg leading-none transition">×</button>
+          <span class="text-gray-400 text-sm">${open?'▲':'▼'}</span>
+        </div>
+      </div>
+      ${open ? `
+      <div class="p-5 space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="${lbl}">Naam werkzaamheid</label>
+            <input class="${inp}" placeholder="bijv. Sloopwerk wand" value="${w.naam}"
+              oninput="updateWerk('${w.id}','naam',this.value)" />
+          </div>
+          <div>
+            <label class="${lbl}">Omschrijving</label>
+            <input class="${inp}" placeholder="Korte omschrijving" value="${w.omschrijving}"
+              oninput="updateWerk('${w.id}','omschrijving',this.value)" />
+          </div>
+        </div>
+        <div class="grid grid-cols-4 gap-3">
+          <div>
+            <label class="${lbl}">Aantal</label>
+            <input class="${inp}" type="number" min="0" step="0.5" value="${w.aantal}"
+              oninput="updateWerk('${w.id}','aantal',parseFloat(this.value)||0)" />
+          </div>
+          <div>
+            <label class="${lbl}">Eenheid</label>
+            <select class="${inp}" onchange="updateWerk('${w.id}','eenheid',this.value)">
+              ${['m²','m¹','stuks','uur','dag','set','lump sum'].map(u =>
+                `<option ${w.eenheid===u?'selected':''}>${u}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="${lbl}">Materiaal p/e (€)</label>
+            <input class="${inp}" type="number" min="0" step="0.50" value="${w.matPrijs}"
+              oninput="updateWerk('${w.id}','matPrijs',parseFloat(this.value)||0)" />
+          </div>
+          <div>
+            <label class="${lbl}">Arbeidsuren</label>
+            <input class="${inp}" type="number" min="0" step="0.5" value="${w.uren}"
+              oninput="updateWerk('${w.id}','uren',parseFloat(this.value)||0)" />
+          </div>
+        </div>
+        <div class="grid grid-cols-4 gap-3">
+          <div>
+            <label class="${lbl}">Uurtarief (€)</label>
+            <input class="${inp}" type="number" min="0" value="${w.tarief}"
+              oninput="updateWerk('${w.id}','tarief',parseFloat(this.value)||0)" />
+          </div>
+          <div>
+            <label class="${lbl}">Marge (%)</label>
+            <input class="${inp}" type="number" min="0" max="100" value="${w.marge}"
+              oninput="updateWerk('${w.id}','marge',parseFloat(this.value)||0)" />
+          </div>
+          <div>
+            <label class="${lbl}">Risico-opslag (%)</label>
+            <input class="${inp}" type="number" min="0" max="100" value="${w.risico}"
+              oninput="updateWerk('${w.id}','risico',parseFloat(this.value)||0)" />
+          </div>
+          <div>
+            <label class="${lbl}">BTW (%)</label>
+            <select class="${inp}" onchange="updateWerk('${w.id}','btw',parseInt(this.value))">
+              <option ${w.btw===21?'selected':''}>21</option>
+              <option ${w.btw===9?'selected':''}>9</option>
+              <option ${w.btw===0?'selected':''}>0</option>
+            </select>
+          </div>
+        </div>
+        <div class="bg-gray-50 rounded-xl p-4 grid grid-cols-4 gap-3 text-sm">
+          <div><p class="text-gray-500 text-xs">Materiaal</p><p class="font-semibold">${eur(c.mat)}</p></div>
+          <div><p class="text-gray-500 text-xs">Arbeid</p><p class="font-semibold">${eur(c.arb)}</p></div>
+          <div><p class="text-gray-500 text-xs">Excl. BTW</p><p class="font-semibold">${eur(c.exclBtw)}</p></div>
+          <div><p class="text-gray-500 text-xs">Incl. BTW</p><p class="font-bold text-blue-700">${eur(c.inclBtw)}</p></div>
+        </div>
+      </div>` : ''}
+    </div>`
+  }).join('')
+
+  return `
+  <div class="space-y-4">
+    ${rows}
+    <button onclick="addWerk()" class="w-full py-3 rounded-xl border-2 border-dashed border-blue-300 text-blue-600
+      font-medium text-sm hover:bg-blue-50 transition">
+      + Werkzaamheid toevoegen
+    </button>
+    ${ws.length > 0 ? `
+    <div class="flex justify-end">
+      <div class="bg-blue-600 text-white rounded-xl px-6 py-3 text-sm font-semibold">
+        Totaal werkzaamheden: ${eur(totaal)}
+      </div>
+    </div>` : ''}
+  </div>`
+}
+
+// ─── STEP 4: Extra kosten ─────────────────────────────────────────────────────
+function buildExtraForm() {
+  const ex = state.extra
+  const inp = 'w-full rounded-xl border border-gray-200 pl-7 pr-4 py-3 text-sm'
+  const lbl = 'block text-sm font-medium text-gray-700 mb-1.5'
+  const fields = [
+    ['voorrijkosten','🚐 Voorrijkosten'],['afval','♻️ Afval- en verwerkingskosten'],
+    ['materieel','🏗️ Huur materieel'],['onderaannemer','👷 Onderaannemer'],
+    ['parkeer','🅿️ Parkeerkosten'],['spoed','⚡ Spoedtoeslag']
+  ]
+  const totaal = fields.reduce((s,[f]) => s + (Number(ex[f])||0), 0) + (ex.overige||0)
+
+  return `
+  <div class="space-y-4">
+    <p class="text-sm text-gray-500">Vul alleen de kosten in die van toepassing zijn.</p>
+    <div class="grid grid-cols-2 gap-4">
+      ${fields.map(([f,label]) => `
+        <div>
+          <label class="${lbl}">${label}</label>
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">€</span>
+            <input class="${inp}" type="number" min="0" step="5" value="${ex[f]||''}" placeholder="0"
+              oninput="setExtra('${f}',parseFloat(this.value)||0)" />
+          </div>
+        </div>`).join('')}
+    </div>
+    <div class="border-t border-gray-100 pt-4">
+      <label class="${lbl}">📎 Overige kosten</label>
+      <div class="grid grid-cols-2 gap-4">
+        <div class="relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">€</span>
+          <input class="${inp}" type="number" min="0" step="5" value="${ex.overige||''}" placeholder="0"
+            oninput="setExtra('overige',parseFloat(this.value)||0)" />
+        </div>
+        <input class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm" placeholder="Omschrijving"
+          value="${ex.overigeNaam}" oninput="setExtra('overigeNaam',this.value)" />
+      </div>
+    </div>
+    ${totaal > 0 ? `
+    <div class="flex justify-between items-center bg-amber-50 border border-amber-200 rounded-xl px-5 py-3">
+      <span class="text-sm font-medium text-amber-800">Totaal extra kosten</span>
+      <span class="font-bold text-amber-900">${eur(totaal)}</span>
+    </div>` : ''}
+  </div>`
+}
+
+// ─── STEP 5: Samenvatting ─────────────────────────────────────────────────────
+function buildSamenvatting() {
+  const c = calcTotals()
+  const ex = state.extra
+  const hasExtra = c.extraSum > 0
+
+  const row = (label, val, cls='') =>
+    `<div class="flex justify-between py-2.5 ${cls}">
+       <span class="text-sm text-gray-600">${label}</span>
+       <span class="text-sm font-medium">${val}</span>
+     </div>`
+
+  return `
+  <div class="space-y-4">
+    <div class="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-100 overflow-hidden">
+      <div class="px-5 py-3 bg-gray-50">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Werkzaamheden</p>
+      </div>
+      <div class="px-5">
+        ${row('Materiaalkosten', eur(c.totMat))}
+        ${row('Arbeidskosten', eur(c.totArb))}
+        ${row('Risico-opslag', eur(c.totRisico))}
+        ${row('Marge', eur(c.totMarge))}
+      </div>
+      ${hasExtra ? `
+      <div class="px-5 py-3 bg-gray-50">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Extra kosten</p>
+      </div>
+      <div class="px-5">
+        ${ex.voorrijkosten>0?row('Voorrijkosten',eur(ex.voorrijkosten)):''}
+        ${ex.afval>0?row('Afvalverwerking',eur(ex.afval)):''}
+        ${ex.materieel>0?row('Huur materieel',eur(ex.materieel)):''}
+        ${ex.onderaannemer>0?row('Onderaannemer',eur(ex.onderaannemer)):''}
+        ${ex.parkeer>0?row('Parkeerkosten',eur(ex.parkeer)):''}
+        ${ex.spoed>0?row('Spoedtoeslag',eur(ex.spoed)):''}
+        ${ex.overige>0?row(ex.overigeNaam||'Overige',eur(ex.overige)):''}
+      </div>` : ''}
+      <div class="px-5 py-3 bg-gray-50">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Totalen</p>
+      </div>
+      <div class="px-5">
+        ${row('Subtotaal excl. BTW', eur(c.subtotaal), 'font-semibold')}
+        ${row('BTW', eur(c.btw))}
+      </div>
+      <div class="px-5 py-4 bg-blue-600">
+        <div class="flex justify-between items-center">
+          <span class="text-white font-semibold">Totaal incl. BTW</span>
+          <span class="text-white text-2xl font-bold">${eur(c.totaal)}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-amber-50 border border-amber-100 rounded-xl p-4">
+      <p class="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-2">Aannames</p>
+      ${CONFIG.aannames.map(a => `<p class="text-xs text-amber-800">• ${a}</p>`).join('')}
+    </div>
+
+    <button onclick="setState({screen:'quote'})"
+      class="w-full py-4 rounded-2xl bg-blue-600 text-white font-semibold text-base hover:bg-blue-700 transition">
+      📄 Bekijk conceptofferte →
+    </button>
+  </div>`
+}
+
+// ─── FULL QUOTE ───────────────────────────────────────────────────────────────
+function buildFullQuote() {
+  const k = state.klant
+  const p = state.project
+  const ws = state.werkzaamheden
+  const c = calcTotals()
+  const nr = offerteNr()
+  const vandaag = new Date().toISOString().split('T')[0]
+  const geldigDatum = new Date()
+  geldigDatum.setDate(geldigDatum.getDate() + CONFIG.geldigheid)
+  const geldigTot = geldigDatum.toISOString().split('T')[0]
+
+  return `
+  <div>
+    <!-- Controls (no-print) -->
+    <div class="flex items-center justify-between mb-6 no-print">
+      <button onclick="setState({screen:'calculator',step:5})" class="flex items-center gap-2 text-gray-500 hover:text-gray-700 transition text-sm font-medium">
+        ← Terug naar samenvatting
+      </button>
+      <button onclick="window.print()" class="px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition">
+        🖨️ Afdrukken / Opslaan als PDF
+      </button>
+    </div>
+
+    <!-- Quote document -->
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden fade-in">
+      <!-- Header -->
+      <div class="bg-blue-600 px-8 py-6 flex justify-between items-start">
+        <div>
+          <div class="w-12 h-12 rounded-xl bg-white text-blue-600 font-bold text-lg flex items-center justify-center mb-3">
+            ${CONFIG.logo}
+          </div>
+          <h1 class="text-white font-bold text-xl">${CONFIG.naam}</h1>
+          <p class="text-blue-200 text-sm">${CONFIG.adres}</p>
+          <p class="text-blue-200 text-sm">${CONFIG.telefoon} · ${CONFIG.email}</p>
+        </div>
+        <div class="text-right">
+          <p class="text-blue-200 text-sm">Offerte</p>
+          <p class="text-white font-bold text-lg">${nr}</p>
+          <p class="text-blue-200 text-sm mt-1">Datum: ${datum(vandaag)}</p>
+          <p class="text-blue-200 text-sm">Geldig tot: ${datum(geldigTot)}</p>
+        </div>
+      </div>
+
+      <div class="p-8 space-y-8">
+        <!-- Klant + Project -->
+        <div class="grid grid-cols-2 gap-6">
+          <div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Opdrachtgever</p>
+            <p class="font-semibold text-gray-900">${k.naam||'—'}</p>
+            ${k.adres?`<p class="text-gray-600 text-sm">${k.adres}</p>`:''}
+            ${k.plaats?`<p class="text-gray-600 text-sm">${k.plaats}</p>`:''}
+            ${k.email?`<p class="text-gray-600 text-sm">${k.email}</p>`:''}
+            ${k.telefoon?`<p class="text-gray-600 text-sm">${k.telefoon}</p>`:''}
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Project</p>
+            <p class="font-semibold text-gray-900">${projectLabels[p.type]||p.type}</p>
+            ${p.locatie?`<p class="text-gray-600 text-sm">📍 ${p.locatie}</p>`:''}
+            ${p.startdatum?`<p class="text-gray-600 text-sm">📅 Start: ${datum(p.startdatum)}</p>`:''}
+          </div>
+        </div>
+
+        ${k.omschrijving?`
+        <div class="bg-gray-50 rounded-xl p-4">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Omschrijving</p>
+          <p class="text-gray-700 text-sm">${k.omschrijving}</p>
+        </div>`:''}
+
+        <!-- Werkzaamheden tabel -->
+        <div>
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Werkzaamheden</p>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-gray-50 text-gray-500 text-xs uppercase">
+                <th class="text-left py-2 px-3 rounded-l-lg">Omschrijving</th>
+                <th class="text-right py-2 px-3">Aantal</th>
+                <th class="text-right py-2 px-3">Materiaal</th>
+                <th class="text-right py-2 px-3">Arbeid</th>
+                <th class="text-right py-2 px-3 rounded-r-lg">Totaal excl.</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              ${ws.map(w => {
+                const ci = calcItem(w)
+                return `<tr>
+                  <td class="py-3 px-3">
+                    <p class="font-medium text-gray-900">${w.naam}</p>
+                    ${w.omschrijving?`<p class="text-gray-500 text-xs">${w.omschrijving}</p>`:''}
+                  </td>
+                  <td class="py-3 px-3 text-right text-gray-600">${w.aantal} ${w.eenheid}</td>
+                  <td class="py-3 px-3 text-right text-gray-600">${eur(ci.mat)}</td>
+                  <td class="py-3 px-3 text-right text-gray-600">${eur(ci.arb)}</td>
+                  <td class="py-3 px-3 text-right font-medium">${eur(ci.exclBtw)}</td>
+                </tr>`
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Totalen -->
+        <div class="border-t border-gray-100 pt-6">
+          <div class="max-w-xs ml-auto space-y-2">
+            <div class="flex justify-between text-sm text-gray-600">
+              <span>Subtotaal excl. BTW</span><span>${eur(c.subtotaal)}</span>
+            </div>
+            <div class="flex justify-between text-sm text-gray-600">
+              <span>BTW</span><span>${eur(c.btw)}</span>
+            </div>
+            <div class="flex justify-between font-bold text-lg bg-blue-600 text-white rounded-xl px-4 py-3 mt-3">
+              <span>Totaal incl. BTW</span><span>${eur(c.totaal)}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Aannames & Voorwaarden -->
+        <div class="grid grid-cols-2 gap-6 border-t border-gray-100 pt-6">
+          <div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Aannames</p>
+            ${CONFIG.aannames.map(a => `<p class="text-xs text-gray-600 mb-1">• ${a}</p>`).join('')}
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Voorwaarden</p>
+            ${CONFIG.voorwaarden.map(v => `<p class="text-xs text-gray-600 mb-1">• ${v}</p>`).join('')}
+          </div>
+        </div>
+
+        <!-- CTA -->
+        <div class="bg-blue-50 border border-blue-200 rounded-2xl p-6 text-center no-print">
+          <p class="font-semibold text-gray-900 mb-1">Akkoord met deze offerte?</p>
+          <p class="text-sm text-gray-500 mb-4">Neem contact met ons op of geef direct akkoord.</p>
+          <div class="flex gap-3 justify-center">
+            <a href="mailto:${CONFIG.email}?subject=Akkoord offerte ${nr}"
+              class="px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition">
+              ✉️ Akkoord geven
+            </a>
+            <a href="tel:${CONFIG.telefoon}"
+              class="px-5 py-2.5 rounded-xl border border-blue-300 text-blue-700 text-sm font-medium hover:bg-blue-100 transition">
+              📞 Bel ons
+            </a>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-xs text-gray-400 border-t border-gray-100 pt-4">
+          ${CONFIG.naam} · KvK ${CONFIG.kvk} · BTW ${CONFIG.btwnummer}
+        </div>
+      </div>
+    </div>
+  </div>`
+}
+
+// ─── LEAD ─────────────────────────────────────────────────────────────────────
+function buildLead() {
+  return `
+  <div class="max-w-lg mx-auto fade-in">
+    <div class="text-center mb-8">
+      <button onclick="setState({screen:'home'})" class="text-sm text-gray-400 hover:text-gray-600 mb-6 block mx-auto">← Terug</button>
+      <h2 class="text-2xl font-bold text-gray-900 mb-2">Jouw eigen versie aanvragen</h2>
+      <p class="text-gray-500">Laat je gegevens achter en we passen de calculator aan op jouw tarieven, diensten en huisstijl.</p>
+    </div>
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 space-y-5">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Naam</label>
+          <input class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm" placeholder="Jouw naam" id="lead-naam" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Bedrijfsnaam</label>
+          <input class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm" placeholder="Jansen Bouw" id="lead-bedrijf" />
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">E-mailadres</label>
+          <input class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm" type="email" placeholder="jij@bedrijf.nl" id="lead-email" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Telefoonnummer</label>
+          <input class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm" placeholder="06-12345678" id="lead-tel" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Type bouwbedrijf</label>
+        <select class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm" id="lead-type">
+          <option>Selecteer...</option>
+          <option>Aannemer / Renovatiebedrijf</option>
+          <option>Dakdekker</option>
+          <option>Timmerbedrijf</option>
+          <option>Installatiebedrijf</option>
+          <option>Klusbedrijf</option>
+          <option>Anders</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Hoe maak je nu offertes?</label>
+        <select class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm" id="lead-werkwijze">
+          <option>Selecteer...</option>
+          <option>Excel / Google Sheets</option>
+          <option>Word / losse documenten</option>
+          <option>Op gevoel / uit het hoofd</option>
+          <option>Boekhoudpakket</option>
+          <option>Ander systeem</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Opmerking (optioneel)</label>
+        <textarea class="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm resize-none" rows="3"
+          placeholder="Wat wil je aanpassen of toevoegen?" id="lead-opmerking"></textarea>
+      </div>
+      <button onclick="submitLead()" class="w-full py-3.5 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition">
+        Aanvraag versturen →
+      </button>
+      <p class="text-center text-xs text-gray-400">Geen spam. We nemen binnen 1 werkdag contact op.</p>
+    </div>
+  </div>`
+}
+
+// ─── Event handlers ───────────────────────────────────────────────────────────
+function attachEvents() {
+  // Input bindings are inline oninput handlers — no extra event attachment needed
+}
+
+function setKlant(field, val) {
+  state.klant[field] = val
+  if (field === 'naam') {
+    // Refresh next button state without full re-render
+    const btn = document.querySelector('button[onclick="nextStep()"]')
+    if (btn) {
+      const dis = val.trim().length === 0
+      btn.disabled = dis
+      btn.className = btn.className.replace(dis ? '' : 'opacity-40 cursor-not-allowed', '')
+      if (dis) btn.classList.add('opacity-40', 'cursor-not-allowed')
+      else { btn.classList.remove('opacity-40'); btn.classList.remove('cursor-not-allowed') }
+    }
+  }
+}
+function setProject(field, val) { state.project[field] = val; render() }
+function setExtra(field, val) { state.extra[field] = val; render() }
+
+function nextStep() {
+  if (state.step === 1 && !state.klant.naam.trim()) return
+  if (state.step === 3 && state.werkzaamheden.length === 0) return
+  state.step = Math.min(5, state.step + 1)
+  render()
+}
+
+function addWerk() {
+  const w = { id: newId(), naam:'', omschrijving:'', aantal:1, eenheid:'m²',
+    matPrijs:0, uren:0, tarief:CONFIG.uurtarief, marge:CONFIG.marge, risico:CONFIG.risico, btw:21, _open:true }
+  state.werkzaamheden.push(w)
+  render()
+}
+
+function removeWerk(id) {
+  state.werkzaamheden = state.werkzaamheden.filter(w => w.id !== id)
+  render()
+}
+
+function toggleWerk(id) {
+  const w = state.werkzaamheden.find(w => w.id === id)
+  if (w) { w._open = !w._open; render() }
+}
+
+function updateWerk(id, field, val) {
+  const w = state.werkzaamheden.find(w => w.id === id)
+  if (w) { w[field] = val; render() }
+}
+
+function submitLead() {
+  document.getElementById('app').innerHTML = `
+  <div class="max-w-lg mx-auto text-center py-20 fade-in">
+    <div class="text-5xl mb-4">✅</div>
+    <h3 class="text-xl font-semibold text-gray-900 mb-2">Aanvraag ontvangen!</h3>
+    <p class="text-gray-500 mb-6">We nemen binnen 1 werkdag contact met je op.</p>
+    <button onclick="setState({screen:'home'})" class="px-6 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition">
+      Terug naar home
+    </button>
+  </div>`
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', render)
+</script>
+
+<!-- ===== HTML SHELL ===== -->
+<div class="min-h-screen flex flex-col">
+  <!-- Navbar -->
+  <nav class="bg-white border-b border-gray-100 px-6 py-4 no-print sticky top-0 z-10">
+    <div class="max-w-5xl mx-auto flex items-center justify-between">
+      <button onclick="setState({screen:'home'})" class="flex items-center gap-3 hover:opacity-80 transition">
+        <div class="w-9 h-9 rounded-xl bg-blue-600 text-white font-bold text-sm flex items-center justify-center">
+          JR
+        </div>
+        <div>
+          <p class="font-semibold text-gray-900 text-sm leading-tight">Jansen Renovatie & Aanbouw</p>
+          <p class="text-gray-400 text-xs">Offerte Calculator · Demo</p>
+        </div>
+      </button>
+      <button onclick="setState({screen:'lead'})" class="text-sm text-blue-600 font-medium hover:underline">
+        Vraag jouw eigen versie aan →
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="flex-1 max-w-5xl mx-auto w-full px-6 py-10">
+    <div id="app"></div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="text-center py-6 text-xs text-gray-400 border-t border-gray-100 no-print">
+    Jansen Renovatie & Aanbouw · info@jansenrenovatie.nl · <span class="text-blue-500 cursor-pointer" onclick="setState({screen:'lead'})">Vraag jouw versie aan</span>
+  </footer>
+</div>
+
+</body>
+</html>
